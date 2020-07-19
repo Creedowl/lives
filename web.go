@@ -22,8 +22,11 @@ type room struct {
 
 func NewServer() *gin.Engine {
 	r := gin.Default()
-	r.GET("/live", RoomInfo)
-	r.GET("/danmaku", Danmaku)
+	api := r.Group("/api")
+	{
+		api.GET("/live", RoomInfo)
+		api.GET("/danmaku", Danmaku)
+	}
 	return r
 }
 
