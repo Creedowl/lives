@@ -19,8 +19,8 @@ type Danmaku struct {
 }
 
 type Quality struct {
-	Quality     uint64
-	Description string
+	Quality     uint64 `json:"quality"`
+	Description string `json:"description"`
 }
 
 type Platform struct {
