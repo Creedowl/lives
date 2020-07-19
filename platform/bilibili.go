@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	InitUrl    = "https://api.live.bilibili.com/room/v1/Room/room_init?id=%d"
+	InitUrl    = "https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%d"
 	LinkUrl    = "https://api.live.bilibili.com/xlive/web-room/v1/index/getRoomPlayInfo?room_id=%d&play_url=1&mask=1&qn=%d&platform=web"
 	DanmakuUrl = "wss://broadcastlv.chat.bilibili.com/sub"
 )
@@ -43,7 +43,7 @@ type Bilibili struct {
 
 func GetRoomId(id uint) uint {
 	res := util.Request("GET", fmt.Sprintf(InitUrl, id))
-	return uint(gjson.Get(res, "data.room_id").Uint())
+	return uint(gjson.Get(res, "data.room_info.room_id").Uint())
 }
 
 func (b *Bilibili) GetLiveInfo() (*Platform, error) {
