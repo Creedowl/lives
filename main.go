@@ -4,8 +4,9 @@ import (
 	"live/util"
 )
 
+var logger = util.GetLogger()
+
 func main() {
-	logger := util.NewLogger()
 	defer logger.Sync()
 	r := NewServer()
 	err := r.Run()

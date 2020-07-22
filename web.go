@@ -4,7 +4,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"live/platform"
-	"log"
 	"net/http"
 )
 
@@ -34,7 +33,7 @@ func RoomInfo(ctx *gin.Context) {
 	var r room
 	err := ctx.BindQuery(&r)
 	if err != nil {
-		log.Println(err)
+		logger.Error(err)
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"msg":  err,
 			"data": nil,
@@ -43,7 +42,7 @@ func RoomInfo(ctx *gin.Context) {
 	}
 	info, err := platform.InitRoom(r.Platform, r.RoomID, r.Quality)
 	if err != nil {
-		log.Println(err)
+		logger.Error(err)
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"msg":  err.Error(),
 			"data": nil,
@@ -54,7 +53,6 @@ func RoomInfo(ctx *gin.Context) {
 		"msg":  "success",
 		"data": info,
 	})
-	log.Printf("%+v\n", r)
 }
 
 // websocket
@@ -62,7 +60,7 @@ func Danmaku(ctx *gin.Context) {
 	var r room
 	err := ctx.BindQuery(&r)
 	if err != nil {
-		log.Println(err)
+		logger.Error(err)
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"msg":  err,
 			"data": nil,
@@ -71,7 +69,7 @@ func Danmaku(ctx *gin.Context) {
 	}
 	conn, err := upgrader.Upgrade(ctx.Writer, ctx.Request, nil)
 	if err != nil {
-		log.Println(err)
+		logger.Error(err)
 		return
 	}
 	platform.InitDanmaku(r.Platform, r.RoomID, conn)
