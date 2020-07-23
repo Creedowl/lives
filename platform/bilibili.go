@@ -12,6 +12,7 @@ import (
 	"github.com/tidwall/gjson"
 	"io/ioutil"
 	"live/util"
+	"math/rand"
 	"time"
 )
 
@@ -29,8 +30,6 @@ const (
 	WS_OP_CONNECT_SUCCESS     = 8
 )
 
-var logger = util.NewLogger()
-
 type Bilibili struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -41,26 +40,55 @@ type Bilibili struct {
 	Quality uint
 }
 
-func GetRoomId(id uint) uint {
-	res := util.Request("GET", fmt.Sprintf(InitUrl, id))
-	return uint(gjson.Get(res, "data.room_info.room_id").Uint())
+func GetBilibiliRoom(roomID, quality uint, client *websocket.Conn) (Room, error) {
+	// get real room id
+	res, err := util.Request("GET", fmt.Sprintf(InitUrl, roomID), "", nil)
+	if err != nil {
+		return nil, err
+	}
+	data := gjson.ParseBytes(res)
+	if data.Get("code").Uint() != 0 {
+		return nil, errors.New(fmt.Sprintf("room %d not found", roomID))
+	}
+	roomID = uint(data.Get("data.room_info.room_id").Uint())
+	// room info request
+	if client == nil {
+		return &Bilibili{
+			RoomID:  roomID,
+			Quality: quality,
+		}, nil
+	}
+	// danmaku request
+	index := fmt.Sprintf("%d:%d", BILIBILI, roomID)
+	if rooms[index] == nil {
+		rooms[index] = &Bilibili{
+			Closed:  false,
+			Clients: make(map[*websocket.Conn]bool),
+			RoomID:  roomID,
+		}
+	}
+	rooms[index].AddClient(client)
+	return rooms[index], nil
 }
 
 func (b *Bilibili) GetLiveInfo() (*Platform, error) {
 	if b.Quality == 0 {
 		b.Quality = 10000
 	}
-	res := util.Request("GET", fmt.Sprintf(LinkUrl, b.RoomID, b.Quality))
-	data := gjson.Parse(res)
-	if data.Get("code").Uint() == 60004 {
-		return nil, errors.New(fmt.Sprintf("room %d not found", b.RoomID))
+	res, err := util.Request("GET", fmt.Sprintf(LinkUrl, b.RoomID, b.Quality), "", nil)
+	if err != nil {
+		return nil, err
 	}
+	data := gjson.ParseBytes(res)
 	// links
-	var links []string
-	data.Get("data.play_url.durl").ForEach(func(key, value gjson.Result) bool {
-		links = append(links, value.Get("url").String())
-		return true
-	})
+	//var links []string
+	//data.Get("data.play_url.durl").ForEach(func(key, value gjson.Result) bool {
+	//	links = append(links, value.Get("url").String())
+	//	return true
+	//})
+	rand.Seed(time.Now().UnixNano())
+	links := data.Get("data.play_url.durl").Array()
+	link := links[rand.Int()%len(links)].Get("url").String()
 	// qualities
 	var qualities []Quality
 	data.Get("data.play_url.quality_description").ForEach(func(key, value gjson.Result) bool {
@@ -73,16 +101,15 @@ func (b *Bilibili) GetLiveInfo() (*Platform, error) {
 	return &Platform{
 		Type:           BILIBILI,
 		RoomID:         b.RoomID,
-		Status:         data.Get("data.live_status").Uint(),
-		CurrentQuality: data.Get("data.play_url.current_qn").Uint(),
-		Links:          links,
+		Status:         uint(data.Get("data.live_status").Uint()),
+		CurrentQuality: uint(data.Get("data.play_url.current_qn").Uint()),
+		Link:           link,
 		Qualities:      qualities,
 	}, nil
 }
 
 func (b *Bilibili) AddClient(conn *websocket.Conn) {
 	b.Clients[conn] = true
-	logger.Info("qwer")
 	logger.Infof("add client %+v", conn.RemoteAddr())
 	// listen close event
 	go func() {
@@ -97,7 +124,7 @@ func (b *Bilibili) AddClient(conn *websocket.Conn) {
 		})
 		// do noting here
 		for {
-			if closed {
+			if closed || b.Closed {
 				break
 			}
 			_, _, err := conn.ReadMessage()
@@ -252,11 +279,11 @@ func (b *Bilibili) listener() {
 		case <-b.ctx.Done():
 			return
 		default:
+			if b.Closed {
+				return
+			}
 			_, raw, err := b.Dan.ReadMessage()
 			if err != nil {
-				if b.Closed {
-					return
-				}
 				logger.Error(err)
 				b.Close()
 				return
@@ -291,6 +318,7 @@ func (b *Bilibili) Connect() {
 		logger.Error(err)
 		return
 	}
+	logger.Infof("connect to danmaku %d", b.RoomID)
 	b.Dan = conn
 	ctx, cancel := context.WithCancel(context.Background())
 	b.ctx = ctx
