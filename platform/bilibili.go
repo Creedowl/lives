@@ -40,6 +40,14 @@ type Bilibili struct {
 	Quality uint
 }
 
+func (b *Bilibili) IsClosed() bool {
+	return b.Closed
+}
+
+func (b *Bilibili) GetClients() map[*websocket.Conn]bool {
+	return b.Clients
+}
+
 func GetBilibiliRoom(roomID, quality uint, client *websocket.Conn) (Room, error) {
 	// get real room id
 	res, err := util.Request("GET", fmt.Sprintf(BilibiliInitUrl, roomID), "", nil)
@@ -67,7 +75,7 @@ func GetBilibiliRoom(roomID, quality uint, client *websocket.Conn) (Room, error)
 			RoomID:  roomID,
 		}
 	}
-	rooms[index].AddClient(client)
+	AddClient(rooms[index], client)
 	return rooms[index], nil
 }
 
@@ -108,44 +116,6 @@ func (b *Bilibili) GetLiveInfo() (*Platform, error) {
 	}, nil
 }
 
-func (b *Bilibili) AddClient(conn *websocket.Conn) {
-	b.Clients[conn] = true
-	logger.Infof("add client %+v", conn.RemoteAddr())
-	// listen close event
-	go func() {
-		closed := false
-		conn.SetCloseHandler(func(code int, text string) error {
-			message := websocket.FormatCloseMessage(code, "close")
-			_ = conn.WriteControl(websocket.CloseMessage, message, time.Now().Add(time.Second*5))
-			closed = true
-			b.RemoveClient(conn)
-			logger.Infof("client %+v closed", conn.RemoteAddr())
-			return nil
-		})
-		// do noting here
-		for {
-			if closed || b.Closed {
-				break
-			}
-			_, _, err := conn.ReadMessage()
-			if err != nil {
-				b.RemoveClient(conn)
-			}
-		}
-	}()
-}
-
-func (b *Bilibili) RemoveClient(conn *websocket.Conn) {
-	_ = conn.Close()
-	if _, ok := b.Clients[conn]; ok {
-		delete(b.Clients, conn)
-	}
-	// all clients exited
-	if len(b.Clients) == 0 {
-		b.Close()
-	}
-}
-
 func (b *Bilibili) Send(danmaku *Danmaku) {
 	logger.Infof("danmaku %+v", danmaku)
 	if len(b.Clients) == 0 {
@@ -155,7 +125,7 @@ func (b *Bilibili) Send(danmaku *Danmaku) {
 	for client := range b.Clients {
 		err := client.WriteJSON(danmaku)
 		if err != nil {
-			b.RemoveClient(client)
+			RemoveClient(b, client)
 			continue
 		}
 	}

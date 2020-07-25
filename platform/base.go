@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/gorilla/websocket"
 	"live/util"
+	"time"
 )
 
 type Type uint32
@@ -38,8 +39,8 @@ type Platform struct {
 
 type Room interface {
 	GetLiveInfo() (*Platform, error)
-	AddClient(conn *websocket.Conn)
-	RemoveClient(conn *websocket.Conn)
+	GetClients() map[*websocket.Conn]bool
+	IsClosed() bool
 	Send(danmaku *Danmaku)
 	Close()
 	Connect()
@@ -56,6 +57,46 @@ func selectPlatform(platform Type, roomID, quality uint, client *websocket.Conn)
 		return GetDouyuRoom(roomID, quality, client)
 	default:
 		return nil, errors.New(fmt.Sprintf("platform %d not found", platform))
+	}
+}
+
+func AddClient(room Room, conn *websocket.Conn) {
+	clients := room.GetClients()
+	clients[conn] = true
+	logger.Infof("add client %+v", conn.RemoteAddr())
+	// listen close event
+	go func() {
+		closed := false
+		conn.SetCloseHandler(func(code int, text string) error {
+			message := websocket.FormatCloseMessage(code, "close")
+			_ = conn.WriteControl(websocket.CloseMessage, message, time.Now().Add(time.Second*5))
+			closed = true
+			RemoveClient(room, conn)
+			logger.Infof("client %+v closed", conn.RemoteAddr())
+			return nil
+		})
+		// do noting here
+		for {
+			if closed || room.IsClosed() {
+				break
+			}
+			_, _, err := conn.ReadMessage()
+			if err != nil {
+				RemoveClient(room, conn)
+			}
+		}
+	}()
+}
+
+func RemoveClient(room Room, conn *websocket.Conn) {
+	clients := room.GetClients()
+	_ = conn.Close()
+	if _, ok := clients[conn]; ok {
+		delete(clients, conn)
+	}
+	// all clients exited
+	if len(clients) == 0 {
+		room.Close()
 	}
 }
 

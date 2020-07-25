@@ -44,6 +44,14 @@ type Douyu struct {
 	Clients map[*websocket.Conn]bool
 }
 
+func (d *Douyu) GetClients() map[*websocket.Conn]bool {
+	return d.Clients
+}
+
+func (d *Douyu) IsClosed() bool {
+	return d.Closed
+}
+
 func GetDouyuRoom(roomID, quality uint, client *websocket.Conn) (Room, error) {
 	// get real room id
 	html, err := util.Request("GET", fmt.Sprintf(DouyuBaseUrl, roomID), "", nil)
@@ -80,7 +88,7 @@ func GetDouyuRoom(roomID, quality uint, client *websocket.Conn) (Room, error) {
 			RoomID:  roomID,
 		}
 	}
-	rooms[index].AddClient(client)
+	AddClient(rooms[index], client)
 	return rooms[index], nil
 }
 
@@ -147,44 +155,6 @@ func (d *Douyu) GetLiveInfo() (*Platform, error) {
 	}, nil
 }
 
-func (d *Douyu) AddClient(conn *websocket.Conn) {
-	d.Clients[conn] = true
-	logger.Infof("add client %+v", conn.RemoteAddr())
-	// listen close event
-	go func() {
-		closed := false
-		conn.SetCloseHandler(func(code int, text string) error {
-			message := websocket.FormatCloseMessage(code, "close")
-			_ = conn.WriteControl(websocket.CloseMessage, message, time.Now().Add(time.Second*5))
-			closed = true
-			d.RemoveClient(conn)
-			logger.Infof("client %+v closed", conn.RemoteAddr())
-			return nil
-		})
-		// do noting here
-		for {
-			if closed || d.Closed {
-				break
-			}
-			_, _, err := conn.ReadMessage()
-			if err != nil {
-				d.RemoveClient(conn)
-			}
-		}
-	}()
-}
-
-func (d *Douyu) RemoveClient(conn *websocket.Conn) {
-	_ = conn.Close()
-	if _, ok := d.Clients[conn]; ok {
-		delete(d.Clients, conn)
-	}
-	// all clients exited
-	if len(d.Clients) == 0 {
-		d.Close()
-	}
-}
-
 func (d *Douyu) Send(danmaku *Danmaku) {
 	logger.Infof("danmaku %+v", danmaku)
 	if len(d.Clients) == 0 {
@@ -194,7 +164,7 @@ func (d *Douyu) Send(danmaku *Danmaku) {
 	for client := range d.Clients {
 		err := client.WriteJSON(danmaku)
 		if err != nil {
-			d.RemoveClient(client)
+			RemoveClient(d, client)
 			continue
 		}
 	}
