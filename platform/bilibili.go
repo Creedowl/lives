@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	InitUrl    = "https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%d"
-	LinkUrl    = "https://api.live.bilibili.com/xlive/web-room/v1/index/getRoomPlayInfo?room_id=%d&play_url=1&mask=1&qn=%d&platform=web"
-	DanmakuUrl = "wss://broadcastlv.chat.bilibili.com/sub"
+	BilibiliInitUrl    = "https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=%d"
+	BilibiliLinkUrl    = "https://api.live.bilibili.com/xlive/web-room/v1/index/getRoomPlayInfo?room_id=%d&play_url=1&mask=1&qn=%d&platform=web"
+	BilibiliDanmakuUrl = "wss://broadcastlv.chat.bilibili.com/sub"
 )
 
 const (
@@ -42,7 +42,7 @@ type Bilibili struct {
 
 func GetBilibiliRoom(roomID, quality uint, client *websocket.Conn) (Room, error) {
 	// get real room id
-	res, err := util.Request("GET", fmt.Sprintf(InitUrl, roomID), "", nil)
+	res, err := util.Request("GET", fmt.Sprintf(BilibiliInitUrl, roomID), "", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +75,7 @@ func (b *Bilibili) GetLiveInfo() (*Platform, error) {
 	if b.Quality == 0 {
 		b.Quality = 10000
 	}
-	res, err := util.Request("GET", fmt.Sprintf(LinkUrl, b.RoomID, b.Quality), "", nil)
+	res, err := util.Request("GET", fmt.Sprintf(BilibiliLinkUrl, b.RoomID, b.Quality), "", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +146,7 @@ func (b *Bilibili) RemoveClient(conn *websocket.Conn) {
 	}
 }
 
-func (b *Bilibili) Send(danmaku Danmaku) {
+func (b *Bilibili) Send(danmaku *Danmaku) {
 	logger.Infof("danmaku %+v", danmaku)
 	if len(b.Clients) == 0 {
 		b.Close()
@@ -159,7 +159,6 @@ func (b *Bilibili) Send(danmaku Danmaku) {
 			continue
 		}
 	}
-	return
 }
 
 func (b *Bilibili) Close() {
@@ -176,11 +175,7 @@ func (b *Bilibili) Close() {
 		_ = client.Close()
 	}
 	delete(rooms, fmt.Sprintf("%d:%d", BILIBILI, b.RoomID))
-	logger.Infow("room closed",
-		"room id", b.RoomID,
-		"rooms", rooms)
-	return
-
+	logger.Infof("room %d closed, rooms %+v", b.RoomID, rooms)
 }
 
 // danmaku data structure
@@ -193,14 +188,14 @@ func (b *Bilibili) Close() {
 // +-------------+-------+-------+------------+------------+------------------+
 // source: https://github.com/metowolf/BilibiliHelper/wiki/%E5%BC%B9%E5%B9%95%E5%8D%8F%E8%AE%AE
 // note: data in head are big endian
-func encode(data []byte, op int) []byte {
-	var header = []byte{0, 0, 0, 0, 0, 0x10, 0, 0x1, 0, 0, 0, byte(op), 0, 0, 0, 0x1}
+func (b *Bilibili) encode(data []byte, op int) []byte {
+	header := []byte{0, 0, 0, 0, 0, 0x10, 0, 0x1, 0, 0, 0, byte(op), 0, 0, 0, 0x1}
 	// set LEN
 	binary.BigEndian.PutUint32(header[0:], uint32(len(header)+len(data)))
 	return append(header, data...)
 }
 
-func decode(raw []byte) ([]string, error) {
+func (b *Bilibili) decode(raw []byte) ([]string, error) {
 	header := raw[:16]
 	var res []string
 	operation := binary.BigEndian.Uint32(header[8:])
@@ -245,7 +240,7 @@ func (b *Bilibili) authenticate() error {
 	if err != nil {
 		return err
 	}
-	err = b.Dan.WriteMessage(websocket.BinaryMessage, encode(data, WS_OP_USER_AUTHENTICATION))
+	err = b.Dan.WriteMessage(websocket.BinaryMessage, b.encode(data, WS_OP_USER_AUTHENTICATION))
 	if err != nil {
 		return err
 	}
@@ -254,7 +249,7 @@ func (b *Bilibili) authenticate() error {
 
 func (b *Bilibili) heartBeat() {
 	defer logger.Infof("heartbeat of room %d exited", b.RoomID)
-	data := encode(nil, WS_OP_HEARTBEAT)
+	data := b.encode(nil, WS_OP_HEARTBEAT)
 	ticker := time.NewTicker(time.Second * 30)
 	defer ticker.Stop()
 	for {
@@ -279,26 +274,26 @@ func (b *Bilibili) listener() {
 		case <-b.ctx.Done():
 			return
 		default:
+			_, raw, err := b.Dan.ReadMessage()
 			if b.Closed {
 				return
 			}
-			_, raw, err := b.Dan.ReadMessage()
 			if err != nil {
 				logger.Error(err)
 				b.Close()
 				return
 			}
-			res, err := decode(raw)
+			res, err := b.decode(raw)
 			if err != nil {
 				logger.Error(err)
 				b.Close()
 				return
 			}
-			logger.Infof("room id %d clients %+v", b.RoomID, b.Clients)
+			logger.Debugf("room id %d clients %+v", b.RoomID, b.Clients)
 			for _, dan := range res {
 				_danmaku := gjson.Parse(dan)
 				if _danmaku.Get("cmd").String() == "DANMU_MSG" {
-					b.Send(Danmaku{
+					b.Send(&Danmaku{
 						Text:  _danmaku.Get("info.1").String(),
 						Color: "#ffffff",
 						Type:  0,
@@ -313,16 +308,14 @@ func (b *Bilibili) Connect() {
 	if b.Dan != nil {
 		return
 	}
-	conn, _, err := websocket.DefaultDialer.Dial(DanmakuUrl, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(BilibiliDanmakuUrl, nil)
 	if err != nil {
 		logger.Error(err)
 		return
 	}
 	logger.Infof("connect to danmaku %d", b.RoomID)
 	b.Dan = conn
-	ctx, cancel := context.WithCancel(context.Background())
-	b.ctx = ctx
-	b.cancel = cancel
+	b.ctx, b.cancel = context.WithCancel(context.Background())
 	// start listener
 	go b.listener()
 	err = b.authenticate()
