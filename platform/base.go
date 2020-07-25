@@ -40,7 +40,7 @@ type Room interface {
 	GetLiveInfo() (*Platform, error)
 	AddClient(conn *websocket.Conn)
 	RemoveClient(conn *websocket.Conn)
-	Send(danmaku Danmaku)
+	Send(danmaku *Danmaku)
 	Close()
 	Connect()
 }
@@ -71,6 +71,7 @@ func InitDanmaku(platform Type, roomID uint, conn *websocket.Conn) {
 	room, err := selectPlatform(platform, roomID, 0, conn)
 	if err != nil {
 		logger.Error(err)
+		_ = conn.Close()
 		return
 	}
 	room.Connect()
