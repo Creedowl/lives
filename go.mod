@@ -8,7 +8,7 @@ require (
 	github.com/markbates/pkger v0.17.0
 	github.com/robertkrimen/otto v0.0.0-20191219234010-c382bd3c16ff
 	github.com/stretchr/testify v1.6.1 // indirect
-	github.com/tidwall/gjson v1.6.0
+	github.com/tidwall/gjson v1.9.3
 	go.uber.org/zap v1.15.0
 	gopkg.in/sourcemap.v1 v1.0.5 // indirect
 )
